@@ -9,7 +9,7 @@ Parameters:
 
   GitHubRepo:
     Type: String
-    Description: GitHub repository (example: user/serverless-app)
+    Description: "GitHub repository (example: user/serverless-app)"
 
   GitHubBranch:
     Type: String
@@ -24,7 +24,6 @@ Parameters:
     Description: CodeStar Connections ARN for GitHub (GitHub v2)
 
 Resources:
-
   # =======================================================
   # 1. S3 ARTIFACT BUCKET STACK (foundation for nested templates)
   # =======================================================
@@ -131,7 +130,6 @@ Resources:
         CodeStarConnectionArn: !Ref CodeStarConnectionArn
 
 Outputs:
-
   VPCStackName:
     Value: !Ref VPCStack
 
