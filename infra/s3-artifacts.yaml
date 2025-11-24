@@ -1,0 +1,122 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: S3 Artifact Bucket for Serverless CI/CD Platform
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    Description: Environment identifier (dev/stage/prod)
+
+  EnableKmsEncryption:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Whether to use SSE-KMS (true) or SSE-S3 (false)
+
+Resources:
+  # =======================================================
+  # 1. KMS Key (optional, only if EnableKmsEncryption = true)
+  # =======================================================
+  ArtifactKmsKey:
+    Type: AWS::KMS::Key
+    Condition: UseKms
+    Properties:
+      Description: !Sub "KMS key for artifact encryption - ${EnvironmentName}"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowRootAccount
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: "*"
+
+  ArtifactKmsKeyAlias:
+    Type: AWS::KMS::Alias
+    Condition: UseKms
+    Properties:
+      AliasName: !Sub alias/serverless-artifacts-${EnvironmentName}
+      TargetKeyId: !Ref ArtifactKmsKey
+
+  # =======================================================
+  # 2. Artifact S3 Bucket (Primary Storage for CI/CD Artifacts)
+  # =======================================================
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub serverless-artifacts-${EnvironmentName}-${AWS::AccountId}
+      VersioningConfiguration:
+        Status: Enabled
+
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: !If [UseKms, aws:kms, AES256]
+              KMSMasterKeyID:
+                !If [UseKms, !Ref ArtifactKmsKey, !Ref "AWS::NoValue"]
+
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+      Tags:
+        - Key: Application
+          Value: ServerlessPlatform
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Owner
+          Value: DevOpsTeam
+
+  # =======================================================
+  # 3. Secure Transport Bucket Policy (TLS Enforcement)
+  # =======================================================
+  ArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnforceTLS
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub arn:aws:s3:::${ArtifactBucket}
+              - !Sub arn:aws:s3:::${ArtifactBucket}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  # =======================================================
+  # 4. Lifecycle Rule (Cost Optimization for Build Artifacts)
+  # =======================================================
+  ArtifactLifecycle:
+    Type: AWS::S3::BucketLifecycleConfiguration
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      LifecycleConfiguration:
+        Rules:
+          - Id: CleanupOldArtifacts
+            Status: Enabled
+            ExpirationInDays: 60
+
+Conditions:
+  UseKms: !Equals [!Ref EnableKmsEncryption, "true"]
+
+Outputs:
+  ArtifactBucketName:
+    Value: !Ref ArtifactBucket
+    Description: Name of artifact bucket
+
+  ArtifactBucketArn:
+    Value: !Sub arn:aws:s3:::${ArtifactBucket}
+
+  ArtifactKmsKeyArn:
+    Condition: UseKms
+    Value: !GetAtt ArtifactKmsKey.Arn
+    Description: KMS key for artifact encryption

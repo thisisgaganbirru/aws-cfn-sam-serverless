@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CodePipeline to execute destroy (teardown) via CodeBuild
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+  ArtifactBucketName:
+    Type: String
+  DestroyCodePipelineRoleArn:
+    Type: String
+  DestroyBuildProjectName:
+    Type: String
+  GitHubRepo:
+    Type: String
+  GitHubBranch:
+    Type: String
+    Default: main
+  CodeStarConnectionArn:
+    Type: String
+
+Resources:
+  DestroyPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub serverless-destroy-${EnvironmentName}
+      RoleArn: !Ref DestroyCodePipelineRoleArn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucketName
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: GitHubSource
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: 1
+              OutputArtifacts:
+                - Name: SourceOutput
+              Configuration:
+                ConnectionArn: !Ref CodeStarConnectionArn
+                FullRepositoryId: !Ref GitHubRepo
+                BranchName: !Ref GitHubBranch
+        - Name: Destroy
+          Actions:
+            - Name: DestroyStacks
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              InputArtifacts:
+                - Name: SourceOutput
+              Configuration:
+                ProjectName: !Ref DestroyBuildProjectName
+      RestartExecutionOnUpdate: true
+      Tags:
+        - Key: Application
+          Value: ServerlessPlatform
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Owner
+          Value: DevOpsTeam
+
+Outputs:
+  DestroyPipelineName:
+    Value: !Ref DestroyPipeline

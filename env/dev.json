@@ -1,0 +1,17 @@
+{
+  "StackName": "serverless-platform-dev",
+  "Region": "us-east-1",
+  "Capabilities": ["CAPABILITY_NAMED_IAM"],
+  "Parameters": {
+    "EnvironmentName": "dev",
+    "GitHubRepo": "your-org/your-repo",
+    "GitHubBranch": "main",
+    "TemplateBaseUrl": "https://s3.amazonaws.com/serverless-env-dev/templates",
+    "CodeStarConnectionArn": "arn:aws:codeconnections:us-east-1:890742587843:connection/c71dac19-c1bb-41de-b8f8-c62f9736f68"
+  },
+  "Tags": {
+    "Application": "ServerlessPlatform",
+    "Environment": "dev",
+    "Owner": "DevOpsTeam"
+  }
+}

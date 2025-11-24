@@ -1,0 +1,77 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Multi-Tenant Task Service (Composite Key CRUD)
+
+Globals:
+  Function:
+    Timeout: 10
+    Runtime: python3.12
+    MemorySize: 256
+    Tracing: Active
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref TasksTable
+        LOG_LEVEL: INFO
+
+Resources:
+  ############################################################
+  # DynamoDB Table (Enterprise Composite Key)
+  ############################################################
+  TasksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      TableName: !Sub "tasks-table-${AWS::StackName}"
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+
+  ############################################################
+  # Lambda Function (Single Router Pattern)
+  ############################################################
+  TaskFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handler.lambda_handler
+      CodeUri: src/
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TasksTable
+      Events:
+        CreateTask:
+          Type: Api
+          Properties:
+            Path: /tenants/{tenantId}/users/{userId}/tasks
+            Method: POST
+
+        GetTask:
+          Type: Api
+          Properties:
+            Path: /tenants/{tenantId}/users/{userId}/tasks/{taskId}
+            Method: GET
+
+        UpdateTask:
+          Type: Api
+          Properties:
+            Path: /tenants/{tenantId}/users/{userId}/tasks/{taskId}
+            Method: PUT
+
+        DeleteTask:
+          Type: Api
+          Properties:
+            Path: /tenants/{tenantId}/users/{userId}/tasks/{taskId}
+            Method: DELETE
+
+Outputs:
+  ApiUrl:
+    Description: "API Gateway Base URL"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"

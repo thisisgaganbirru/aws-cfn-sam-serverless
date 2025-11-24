@@ -1,0 +1,131 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CodePipeline for Serverless CI/CD (Python 3.12, SAM)
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    Description: Deployment environment (dev/stage/prod)
+
+  ArtifactBucketName:
+    Type: String
+    Description: S3 bucket that stores CodePipeline/CodeBuild artifacts
+
+  CodePipelineRoleArn:
+    Type: String
+    Description: IAM Role ARN for CodePipeline (from iam-roles.yaml)
+
+  CodeBuildProjectName:
+    Type: String
+    Description: Name of CodeBuild project created in codebuild.yaml
+
+  CloudFormationDeploymentRoleArn:
+    Type: String
+    Description: IAM Role ARN that CloudFormation assumes to deploy stacks
+
+  GitHubRepo:
+    Type: String
+    Description: GitHub repository (example: user/serverless-app)
+
+  GitHubBranch:
+    Type: String
+    Default: main
+    Description: Branch to watch in GitHub
+
+  CodeStarConnectionArn:
+    Type: String
+    Description: CodeStar Connections ARN for GitHub (v2 provider)
+
+Resources:
+
+  # =======================================================
+  # CodePipeline
+  # =======================================================
+  ServerlessPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub serverless-cicd-${EnvironmentName}
+      RoleArn: !Ref CodePipelineRoleArn
+
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucketName
+        EncryptionKey:
+          Id: !Sub arn:aws:kms:${AWS::Region}:${AWS::AccountId}:alias/aws/s3
+          Type: KMS
+
+      Stages:
+
+        # ---------------------------------------------------
+        # STAGE 1 — Source (GitHub)
+        # ---------------------------------------------------
+        - Name: Source
+          Actions:
+            - Name: GitHubSource
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: 1
+              OutputArtifacts:
+                - Name: SourceOutput
+              Configuration:
+                ConnectionArn: !Ref CodeStarConnectionArn
+                FullRepositoryId: !Ref GitHubRepo
+                BranchName: !Ref GitHubBranch
+              RunOrder: 1
+
+        # ---------------------------------------------------
+        # STAGE 2 — Build (CodeBuild)
+        # ---------------------------------------------------
+        - Name: Build
+          Actions:
+            - Name: SAMBuild
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: BuildOutput
+              Configuration:
+                ProjectName: !Ref CodeBuildProjectName
+              RunOrder: 1
+
+        # ---------------------------------------------------
+        # STAGE 3 — Deploy (CloudFormation)
+        # ---------------------------------------------------
+        - Name: Deploy
+          Actions:
+            - Name: CFNDeploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: 1
+              InputArtifacts:
+                - Name: BuildOutput
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                StackName: !Sub serverless-app-${EnvironmentName}
+                TemplatePath: BuildOutput::packaged.yaml
+                Capabilities: CAPABILITY_NAMED_IAM
+                RoleArn: !Ref CloudFormationDeploymentRoleArn
+              RunOrder: 1
+
+      RestartExecutionOnUpdate: true
+
+      Tags:
+        - Key: Application
+          Value: ServerlessPlatform
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Owner
+          Value: DevOpsTeam
+
+Outputs:
+  PipelineName:
+    Description: Name of the CodePipeline pipeline
+    Value: !Ref ServerlessPipeline

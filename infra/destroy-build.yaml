@@ -1,0 +1,61 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CodeBuild project for teardown (stack destroy)
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+  ArtifactBucketName:
+    Type: String
+  DestroyCodeBuildRoleArn:
+    Type: String
+
+Resources:
+  DestroyBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub serverless-destroy-${EnvironmentName}
+      Description: !Sub "Destroy CloudFormation stacks for ${EnvironmentName}"
+      ServiceRole: !Ref DestroyCodeBuildRoleArn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: ENV
+            Value: !Ref EnvironmentName
+          - Name: APP_STACK
+            Value: !Sub serverless-app-${EnvironmentName}
+          - Name: INFRA_STACK
+            Value: !Sub serverless-platform-${EnvironmentName}
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |-
+          version: 0.2
+          phases:
+            install:
+              commands:
+                - chmod +x destroy.sh
+            build:
+              commands:
+                - ./destroy.sh
+          artifacts:
+            files: []
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Sub "/aws/codebuild/serverless-destroy-${EnvironmentName}"
+          StreamName: build
+      Tags:
+        - Key: Application
+          Value: ServerlessPlatform
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Owner
+          Value: DevOpsTeam
+
+Outputs:
+  DestroyBuildProjectName:
+    Value: !Ref DestroyBuildProject

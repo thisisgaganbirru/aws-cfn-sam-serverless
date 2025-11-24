@@ -1,0 +1,12 @@
+{
+  "resource": "/hello",
+  "path": "/",
+  "httpMethod": "GET",
+  "headers": {},
+  "queryStringParameters": null,
+  "pathParameters": null,
+  "stageVariables": null,
+  "requestContext": {},
+  "body": null,
+  "isBase64Encoded": false
+}

@@ -1,0 +1,115 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CodeBuild Project for SAM Serverless Application - Python 3.12
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    Description: Deployment environment (dev/stage/prod)
+
+  ArtifactBucketName:
+    Type: String
+    Description: S3 bucket used for CodePipeline and SAM artifacts
+
+  CodeBuildRoleArn:
+    Type: String
+    Description: IAM Role ARN for CodeBuild (created in iam-roles.yaml)
+
+Resources:
+  # =======================================================
+  # CodeBuild Project
+  # =======================================================
+  SamBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub serverless-sam-build-${EnvironmentName}
+      Description: !Sub "Build + Package Serverless App (Python 3.12) - ${EnvironmentName}"
+      ServiceRole: !Ref CodeBuildRoleArn
+
+      Artifacts:
+        Type: CODEPIPELINE
+
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: ARTIFACT_BUCKET
+            Value: !Ref ArtifactBucketName
+          - Name: ENV
+            Value: !Ref EnvironmentName
+
+      Source:
+        Type: CODEPIPELINE
+
+      TimeoutInMinutes: 30
+
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Sub "/aws/codebuild/sam-build-${EnvironmentName}"
+          StreamName: "build-log"
+
+      Tags:
+        - Key: Application
+          Value: ServerlessPlatform
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: Owner
+          Value: DevOpsTeam
+
+      Cache:
+        Type: LOCAL
+        Modes:
+          - LOCAL_SOURCE_CACHE
+          - LOCAL_CUSTOM_CACHE
+
+  # =======================================================
+  # BuildSpec Inline Definition
+  # =======================================================
+  SamBuildProjectBuildSpec:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "buildspec-config-${EnvironmentName}"
+      Source:
+        Type: NO_SOURCE
+        BuildSpec: |
+          version: 0.2
+
+          phases:
+            install:
+              runtime-versions:
+                python: 3.12
+              commands:
+                - echo "Installing SAM CLI dependencies..."
+                - pip install aws-sam-cli
+
+            pre_build:
+              commands:
+                - echo "Validating SAM template..."
+                - sam validate --lint
+
+            build:
+              commands:
+                - echo "Running SAM Build..."
+                - sam build --use-container --parallel --cached
+
+            post_build:
+              commands:
+                - echo "Packaging SAM template..."
+                - sam package \
+                    --s3-bucket $ARTIFACT_BUCKET \
+                    --output-template-file packaged.yaml
+
+          artifacts:
+            files:
+              - packaged.yaml
+
+          cache:
+            paths:
+              - ~/.cache/pip
+
+Outputs:
+  CodeBuildProjectName:
+    Description: CodeBuild project name
+    Value: !Ref SamBuildProject

@@ -1,0 +1,151 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Master Orchestration Stack for Serverless Application CI/CD Platform
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+    Description: Deployment environment (dev/stage/prod)
+
+  GitHubRepo:
+    Type: String
+    Description: GitHub repository (example: user/serverless-app)
+
+  GitHubBranch:
+    Type: String
+    Default: main
+
+  TemplateBaseUrl:
+    Type: String
+    Description: S3 base URL for nested templates (e.g., https://s3.amazonaws.com/bucket/prefix)
+
+  CodeStarConnectionArn:
+    Type: String
+    Description: CodeStar Connections ARN for GitHub (GitHub v2)
+
+Resources:
+
+  # =======================================================
+  # 1. S3 ARTIFACT BUCKET STACK (foundation for nested templates)
+  # =======================================================
+  S3ArtifactsStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "${TemplateBaseUrl}/s3-artifacts.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        EnableKmsEncryption: true
+
+  # =======================================================
+  # 2. IAM ROLES STACK (depends on artifact bucket)
+  # =======================================================
+  IAMRolesStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - S3ArtifactsStack
+    Properties:
+      TemplateURL: !Sub "${TemplateBaseUrl}/iam-roles.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ArtifactBucketName: !GetAtt S3ArtifactsStack.Outputs.ArtifactBucketName
+
+  # =======================================================
+  # 3. VPC STACK
+  # =======================================================
+  VPCStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - IAMRolesStack
+    Properties:
+      TemplateURL: !Sub "${TemplateBaseUrl}/vpc.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+
+  # =======================================================
+  # 4. CODEBUILD STACK
+  # =======================================================
+  CodeBuildStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - IAMRolesStack
+      - S3ArtifactsStack
+    Properties:
+      TemplateURL: !Sub "${TemplateBaseUrl}/codebuild.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ArtifactBucketName: !GetAtt S3ArtifactsStack.Outputs.ArtifactBucketName
+        CodeBuildRoleArn: !GetAtt IAMRolesStack.Outputs.CodeBuildRoleArn
+
+  # =======================================================
+  # 5. CODEPIPELINE STACK
+  # =======================================================
+  CodePipelineStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - CodeBuildStack
+      - IAMRolesStack
+    Properties:
+      TemplateURL: !Sub "${TemplateBaseUrl}/codepipeline.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ArtifactBucketName: !GetAtt S3ArtifactsStack.Outputs.ArtifactBucketName
+        CodePipelineRoleArn: !GetAtt IAMRolesStack.Outputs.CodePipelineRoleArn
+        CloudFormationDeploymentRoleArn: !GetAtt IAMRolesStack.Outputs.CloudFormationDeploymentRoleArn
+        CodeBuildProjectName: !GetAtt CodeBuildStack.Outputs.CodeBuildProjectName
+        GitHubRepo: !Ref GitHubRepo
+        GitHubBranch: !Ref GitHubBranch
+        CodeStarConnectionArn: !Ref CodeStarConnectionArn
+
+  # =======================================================
+  # 6. DESTROY BUILD STACK
+  # =======================================================
+  DestroyBuildStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - IAMRolesStack
+      - S3ArtifactsStack
+    Properties:
+      TemplateURL: !Sub "${TemplateBaseUrl}/destroy-build.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ArtifactBucketName: !GetAtt S3ArtifactsStack.Outputs.ArtifactBucketName
+        DestroyCodeBuildRoleArn: !GetAtt IAMRolesStack.Outputs.DestroyCodeBuildRoleArn
+
+  # =======================================================
+  # 7. DESTROY PIPELINE STACK
+  # =======================================================
+  DestroyPipelineStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - DestroyBuildStack
+      - IAMRolesStack
+    Properties:
+      TemplateURL: !Sub "${TemplateBaseUrl}/destroy-pipeline.yaml"
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ArtifactBucketName: !GetAtt S3ArtifactsStack.Outputs.ArtifactBucketName
+        DestroyCodePipelineRoleArn: !GetAtt IAMRolesStack.Outputs.DestroyCodePipelineRoleArn
+        DestroyBuildProjectName: !GetAtt DestroyBuildStack.Outputs.DestroyBuildProjectName
+        GitHubRepo: !Ref GitHubRepo
+        GitHubBranch: !Ref GitHubBranch
+        CodeStarConnectionArn: !Ref CodeStarConnectionArn
+
+Outputs:
+
+  VPCStackName:
+    Value: !Ref VPCStack
+
+  IAMRolesStackName:
+    Value: !Ref IAMRolesStack
+
+  ArtifactBucket:
+    Value: !GetAtt S3ArtifactsStack.Outputs.ArtifactBucketName
+
+  CodeBuildProject:
+    Value: !GetAtt CodeBuildStack.Outputs.CodeBuildProjectName
+
+  PipelineName:
+    Value: !GetAtt CodePipelineStack.Outputs.PipelineName
+
+  DestroyPipelineName:
+    Value: !GetAtt DestroyPipelineStack.Outputs.DestroyPipelineName
