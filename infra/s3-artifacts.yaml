@@ -5,18 +5,16 @@ Parameters:
   EnvironmentName:
     Type: String
     Default: dev
-    Description: Environment identifier (dev/stage/prod)
 
   EnableKmsEncryption:
     Type: String
     AllowedValues: ["true", "false"]
     Default: "true"
-    Description: Whether to use SSE-KMS (true) or SSE-S3 (false)
+
+Conditions:
+  UseKms: !Equals [!Ref EnableKmsEncryption, "true"]
 
 Resources:
-  # =======================================================
-  # 1. KMS Key (optional, only if EnableKmsEncryption = true)
-  # =======================================================
   ArtifactKmsKey:
     Type: AWS::KMS::Key
     Condition: UseKms
@@ -49,7 +47,9 @@ Resources:
       BucketName: !Sub serverless-artifacts-${EnvironmentName}-${AWS::AccountId}
       VersioningConfiguration:
         Status: Enabled
-
+      # =======================================================
+      # 3. Secure Transport Bucket Policy (TLS Enforcement)
+      # =======================================================
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -57,22 +57,19 @@ Resources:
               KMSMasterKeyID:
                 !If [UseKms, !Ref ArtifactKmsKey, !Ref "AWS::NoValue"]
 
+      LifecycleConfiguration:
+        Rules:
+          - Id: CleanupOldArtifacts
+            Status: Enabled
+            ExpirationInDays: 60
+
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
-
-      Tags:
-        - Key: Application
-          Value: ServerlessPlatform
-        - Key: Environment
-          Value: !Ref EnvironmentName
-        - Key: Owner
-          Value: DevOpsTeam
-
   # =======================================================
-  # 3. Secure Transport Bucket Policy (TLS Enforcement)
+  # 4. Lifecycle Rule (Cost Optimization for Build Artifacts)
   # =======================================================
   ArtifactBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -92,26 +89,9 @@ Resources:
               Bool:
                 aws:SecureTransport: "false"
 
-  # =======================================================
-  # 4. Lifecycle Rule (Cost Optimization for Build Artifacts)
-  # =======================================================
-  ArtifactLifecycle:
-    Type: AWS::S3::BucketLifecycleConfiguration
-    Properties:
-      Bucket: !Ref ArtifactBucket
-      LifecycleConfiguration:
-        Rules:
-          - Id: CleanupOldArtifacts
-            Status: Enabled
-            ExpirationInDays: 60
-
-Conditions:
-  UseKms: !Equals [!Ref EnableKmsEncryption, "true"]
-
 Outputs:
   ArtifactBucketName:
     Value: !Ref ArtifactBucket
-    Description: Name of artifact bucket
 
   ArtifactBucketArn:
     Value: !Sub arn:aws:s3:::${ArtifactBucket}
@@ -119,4 +99,3 @@ Outputs:
   ArtifactKmsKeyArn:
     Condition: UseKms
     Value: !GetAtt ArtifactKmsKey.Arn
-    Description: KMS key for artifact encryption
